@@ -59,8 +59,16 @@ public class SaveIPToProfileNode extends SingleOutcomeNode {
          * A map of property name to value.
          * @return a map of properties.
          */
+
+        //Attribute where IP will be stored
         @Attribute(order = 100)
         String attribute();
+
+        //Toggle as to whether IP is stored in the clear or SHA256 hashed for privacy
+        @Attribute(order = 200)
+        default boolean storeAsHash() {
+            return false;
+        }
 
     }
 
@@ -83,50 +91,90 @@ public class SaveIPToProfileNode extends SingleOutcomeNode {
         String clientIP = context.request.clientIp;
         debug.message("[" + DEBUG_FILE + "]: client IP found as :" + clientIP);
 
-        //Create SHA256 of IP
-        MessageDigest digest = null;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+        //Check if we're storing in clear or hashed
+        if (config.storeAsHash()){
+
+            //Create SHA256 of IP
+            MessageDigest digest = null;
+            try {
+                digest = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            byte[] clientIPHash = digest.digest(clientIP.getBytes(StandardCharsets.UTF_8));
+            StringBuffer hexString = new StringBuffer();
+
+            for (int i = 0; i < clientIPHash.length; i++) {
+                String hex = Integer.toHexString(0xff & clientIPHash[i]);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+
+            String ipAsHash = hexString.toString();
+            debug.message("[" + DEBUG_FILE + "]: hash of client IP as : " + ipAsHash);
+
+            //Wrapper to access profile
+            AMIdentity userIdentity = coreWrapper.getIdentity(context.sharedState.get(USERNAME).asString(), context.sharedState.get(REALM).asString());
+
+
+            //Create payload that will be saved to profile
+            Map<String, Set> map = new HashMap<String, Set>();
+            Set<String> values = new HashSet<String>();
+            values.add(ipAsHash);
+            map.put(config.attribute(), values);
+
+            //Try and save against the user profile
+            try {
+
+                userIdentity.setAttributes(map);
+                userIdentity.store();
+
+            } catch (IdRepoException e) {
+
+                debug.error("[" + DEBUG_FILE + "]: " + " Error storing profile attribute '{}' ", e);
+
+            } catch (SSOException e) {
+
+                debug.error("[" + DEBUG_FILE + "]: " + "Node exception", e);
+
+            }
+
         }
-        byte[] clientIPHash = digest.digest(clientIP.getBytes(StandardCharsets.UTF_8));
-        StringBuffer hexString = new StringBuffer();
 
-        for (int i = 0; i < clientIPHash.length; i++) {
-            String hex = Integer.toHexString(0xff & clientIPHash[i]);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
+        //Storing in clear
+        else {
 
-        String ipAsHash = hexString.toString();
-        debug.message("[" + DEBUG_FILE + "]: hash of client IP as : " + ipAsHash);
-
-        //Wrapper to access profile
-        AMIdentity userIdentity = coreWrapper.getIdentity(context.sharedState.get(USERNAME).asString(), context.sharedState.get(REALM).asString());
+            //Wrapper to access profile
+            AMIdentity userIdentity = coreWrapper.getIdentity(context.sharedState.get(USERNAME).asString(), context.sharedState.get(REALM).asString());
 
 
-        //Create payload that will be saved to profile
-        Map<String, Set> map = new HashMap<String, Set>();
-        Set<String> values = new HashSet<String>();
-        values.add(ipAsHash);
-        map.put(config.attribute(), values);
+            //Create payload that will be saved to profile
+            Map<String, Set> map = new HashMap<String, Set>();
+            Set<String> values = new HashSet<String>();
+            values.add(clientIP);
+            map.put(config.attribute(), values);
 
-        //Try and save against the user profile
-        try {
+            //Try and save against the user profile
+            try {
 
-            userIdentity.setAttributes(map);
-            userIdentity.store();
+                userIdentity.setAttributes(map);
+                userIdentity.store();
 
-        } catch (IdRepoException e) {
+            } catch (IdRepoException e) {
 
-            debug.error("[" + DEBUG_FILE + "]: " + " Error storing profile attribute '{}' ", e);
+                debug.error("[" + DEBUG_FILE + "]: " + " Error storing profile attribute '{}' ", e);
 
-        } catch (SSOException e) {
+            } catch (SSOException e) {
 
-            debug.error("[" + DEBUG_FILE + "]: " + "Node exception", e);
+                debug.error("[" + DEBUG_FILE + "]: " + "Node exception", e);
+
+            }
 
         }
+
+
+
+
 
 
         return goToNext().build();
